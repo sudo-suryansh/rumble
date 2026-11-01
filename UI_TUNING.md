@@ -19,7 +19,11 @@ Start with these values:
 6. `--motion-damage`: damage-number lifetime animation.
 7. `--motion-shock`: announcement shock-line duration.
 8. `--ease-overshoot`: announcement and panel pop feel.
-9. `S.shake` and `S.reduceFX` in `Rumble_Arena.html`: camera shake and reduced-effects setting.
-10. Announcement tiers and hold time in `AnnouncementManager.next()` in `Rumble_Arena.html`.
+9. `S.shake` and `S.reduceFX` in `index.html`: camera shake and reduced-effects setting.
+10. Announcement tiers and hold time in `AnnouncementManager.next()` in `index.html`.
+
+## Arena selection
+
+The menu's ARENA row and the client collision layout are defined by `ARENAS` in `index.html`. Keep the matching obstacle coordinates in `server.js` synchronized so multiplayer movement and hits use the same arena geometry. The server locks each active match to the first player's arena; later players must select that arena to join.
 
 The work keeps combat, scoring, weapon damage, and AI rules unchanged. Motion settings only affect presentation.

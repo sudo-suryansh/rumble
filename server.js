@@ -10,7 +10,7 @@ const server = http.createServer((req, res) => {
   let u;
   try { u = decodeURIComponent(req.url.split('?')[0]); }
   catch (e) { res.writeHead(400); return res.end('bad request'); }
-  if (u === '/') u = '/Rumble_Arena.html';
+  if (u === '/') u = '/index.html';
   const f = path.resolve(ROOT, '.' + u), rel = path.relative(ROOT, f);
   if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel) || rel.toLowerCase() === 'server.js') { res.writeHead(404); return res.end('not found'); }
   fs.readFile(f, (e, d) => {
@@ -55,8 +55,15 @@ server.on('upgrade', (req, sock) => {
 
 /* ---------- world (must match the boxes in Rumble_Arena.html) ---------- */
 const toBox = ([x, z, w, h, d]) => [x - w / 2, 0, z - d / 2, x + w / 2, h, z + d / 2]; // [x0,y0,z0,x1,y1,z1]
-const BOX = [[0, 0, 6, 5, 6], [-14, -10, 4, 2, 4], [14, -12, 4, 3, 4], [-16, 12, 6, 2, 3], [16, 14, 3, 2, 6], [0, -20, 10, 2, 2], [0, 20, 10, 2, 2], [-26, 0, 3, 4, 3], [26, 0, 3, 4, 3], [8, 8, 2, 1.2, 2], [-8, -8, 2, 1.2, 2], [-6, 14, 2, 1.5, 2], [7, -8, 2, 1.5, 2],
-  [0, -40, 80, 6, 1], [0, 40, 80, 6, 1], [-40, 0, 1, 6, 80], [40, 0, 1, 6, 80]].map(toBox);
+const ARENAS = [
+  [[0, 0, 6, 5, 6], [-14, -10, 4, 2, 4], [14, -12, 4, 3, 4], [-16, 12, 6, 2, 3], [16, 14, 3, 2, 6], [0, -20, 10, 2, 2], [0, 20, 10, 2, 2], [-26, 0, 3, 4, 3], [26, 0, 3, 4, 3], [8, 8, 2, 1.2, 2], [-8, -8, 2, 1.2, 2], [-6, 14, 2, 1.5, 2], [7, -8, 2, 1.5, 2]],
+  [[0, 0, 8, 3.5, 3], [-8, 0, 3, 2, 9], [8, 0, 3, 2, 9], [0, -12, 12, 2.4, 2], [0, 12, 12, 2.4, 2], [-20, -18, 8, 2, 3], [20, 18, 8, 2, 3], [-20, 18, 3, 3, 8], [20, -18, 3, 3, 8], [-25, 0, 5, 1.5, 3], [25, 0, 5, 1.5, 3], [0, -27, 4, 3, 4], [0, 27, 4, 3, 4], [-13, -13, 3, 1.2, 3], [13, 13, 3, 1.2, 3]]
+];
+const ARENA_NAMES = ['THE YARD', 'THE CRUCIBLE'];
+let activeMap = null;
+const bounds = [[0, -40, 80, 6, 1], [0, 40, 80, 6, 1], [-40, 0, 1, 6, 80], [40, 0, 1, 6, 80]];
+let BOX = [];
+function setArena(id) { BOX = [...ARENAS[id], ...bounds].map(o => toBox(o)); }
 // per weapon (same order as client): [damage, pellets, min seconds between shots]
 const WP = [[2, 1, .224], [1, 1, .072], [1, 8, .68], [1, 1, .052], [6, 1, .88], [0, 1, .4]];
 
@@ -161,6 +168,9 @@ function onMsg(c, raw) {
   let m; try { m = JSON.parse(raw); } catch (e) { return; }
   if (m.t === 'join' && !c.p) {
     if (players.size >= MAXP) { frame(c.sock, 1, Buffer.from('{"t":"full"}')); c.sock.end(); return; }
+    const map = Number.isInteger(m.map) && m.map >= 0 && m.map < ARENAS.length ? m.map : 0;
+    if (activeMap !== null && map !== activeMap) { send({ c, sock: c.sock }, { t: 'map', name: ARENA_NAMES[activeMap] }); return; }
+    if (activeMap === null) { activeMap = map; setArena(map); }
     const id = nextId++, n = String(m.name || '').replace(/[^\w \-]/g, '').trim().slice(0, 12) || 'Player' + id;
     const p = c.p = { id, n, c, x: 0, y: 0, z: 30, yw: 0, pt: 0, w: 0, hp: 100, k: 0, d: 0, alive: true, dash: false, dashUntil: 0, dashCd: 0, stateAt: now(), inv: 0, lf: 0, rk: 0 };
     const [x, z] = pickSpawn(p); p.x = x; p.z = z; p.inv = now() + 2;
@@ -193,6 +203,7 @@ function onMsg(c, raw) {
 }
 function leave(c) {
   const p = c.p; if (!p) return; c.p = null; players.delete(p.id);
+  if (!players.size) { activeMap = null; over = false; setArena(0); }
   all({ t: 'l', id: p.id }); console.log('- ' + p.n + ' left (' + players.size + ' online)');
 }
 
