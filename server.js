@@ -1,21 +1,38 @@
-// Rumble Arena PvP server. No npm install needed.  Run:  node server.js   (PORT env var optional, default 8000)
+// Rumble Arena PvP server. No npm install needed.  Run:  node server.js
 // Serves the game files from this folder AND handles the multiplayer WebSocket on the same port.
+//
+// Environment variables (all optional):
+//   PORT              default 8000
+//   HOST              default 0.0.0.0 (LAN-visible). Use 127.0.0.1 for local-only.
+//   ALLOWED_ORIGINS   comma-separated list of extra browser origins allowed to open a WebSocket,
+//                     e.g. "https://you.github.io". Same-origin is always allowed. "*" allows any.
+//   MAX_CONN          max simultaneous sockets, default 64
+//   MAX_CONN_PER_IP   max sockets per IP, default 12 (0 = unlimited; set 0 behind a reverse proxy)
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
-const PORT = process.env.PORT || 8000, ROOT = __dirname;
+const PORT = Number(process.env.PORT) || 8000, HOST = process.env.HOST || '0.0.0.0', ROOT = __dirname;
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const MAX_CONN = Number(process.env.MAX_CONN) || 64;
+const MAX_CONN_PER_IP = process.env.MAX_CONN_PER_IP === undefined ? 12 : Number(process.env.MAX_CONN_PER_IP) || 0;
+const MAX_MSG_PER_SEC = 120, JOIN_TIMEOUT_MS = 10000, IDLE_TIMEOUT_MS = 60000; // client sends ~40 msgs/s at most
 const MAXP = 8, WIN_KILLS = 20, RESPAWN_MS = 3000, DS = 8.5; // DS = damage scale (client weapon dmg * DS = HP lost, players have 100 HP)
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.obj': 'text/plain', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
+// Only these extensions are ever served (allowlist). Source/config files such as server.js and package.json are not listed on purpose.
+const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream', '.obj': 'text/plain', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
+const SEC_HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Cross-Origin-Opener-Policy': 'same-origin' };
 
 /* ---------- static files ---------- */
 const server = http.createServer((req, res) => {
   let u;
   try { u = decodeURIComponent(req.url.split('?')[0]); }
   catch (e) { res.writeHead(400); return res.end('bad request'); }
+  if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { Allow: 'GET, HEAD' }); return res.end('method not allowed'); }
   if (u === '/') u = '/index.html';
   const f = path.resolve(ROOT, '.' + u), rel = path.relative(ROOT, f);
-  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel) || rel.toLowerCase() === 'server.js') { res.writeHead(404); return res.end('not found'); }
+  const hidden = rel.split(path.sep).some(seg => seg.startsWith('.') || seg === 'node_modules'); // .git, .env, dotfiles
+  const type = MIME[path.extname(f).toLowerCase()];
+  if (!type || hidden || rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) { res.writeHead(404, SEC_HEADERS); return res.end('not found'); }
   fs.readFile(f, (e, d) => {
-    if (e) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream' }); res.end(d);
+    if (e) { res.writeHead(404, SEC_HEADERS); return res.end('not found'); }
+    res.writeHead(200, { ...SEC_HEADERS, 'Content-Type': type }); res.end(req.method === 'HEAD' ? undefined : d);
   });
 });
 
@@ -25,7 +42,7 @@ function frame(sock, op, data) {
   if (n < 126) h = Buffer.from([128 | op, n]);
   else if (n < 65536) { h = Buffer.alloc(4); h[0] = 128 | op; h[1] = 126; h.writeUInt16BE(n, 2); }
   else { h = Buffer.alloc(10); h[0] = 128 | op; h[1] = 127; h.writeBigUInt64BE(BigInt(n), 2); }
-  sock.write(Buffer.concat([h, data]));
+  if (!sock.destroyed && sock.writable) sock.write(Buffer.concat([h, data]));
 }
 function parse(c) {
   for (;;) {
@@ -43,17 +60,38 @@ function parse(c) {
     else if (op === 1) onMsg(c, data.toString());
   }
 }
+const ipCount = new Map(); let connCount = 0;
+function originOk(req) {
+  const o = req.headers.origin;
+  if (!o) return true;                                   // non-browser clients (bots, curl) send no Origin
+  if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(o)) return true;
+  try { return new URL(o).host === req.headers.host; } catch (e) { return false; } // same-origin
+}
 server.on('upgrade', (req, sock) => {
-  const key = req.headers['sec-websocket-key'];
+  const key = req.headers['sec-websocket-key'], ip = sock.remoteAddress || '?';
+  const reject = code => { sock.write('HTTP/1.1 ' + code + '\r\nConnection: close\r\n\r\n'); sock.destroy(); };
   if (!key || String(req.headers.upgrade).toLowerCase() !== 'websocket') { sock.destroy(); return; }
+  if (!originOk(req)) return reject('403 Forbidden');
+  if (connCount >= MAX_CONN || (MAX_CONN_PER_IP && (ipCount.get(ip) || 0) >= MAX_CONN_PER_IP)) return reject('503 Service Unavailable');
   const acc = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + acc + '\r\n\r\n');
-  const c = { sock, buf: Buffer.alloc(0), p: null };
-  sock.on('data', d => { c.buf = Buffer.concat([c.buf, d]); parse(c); });
-  sock.on('close', () => leave(c)); sock.on('error', () => { sock.destroy(); });
+  const c = { sock, buf: Buffer.alloc(0), p: null, win: 0, cnt: 0 };
+  connCount++; ipCount.set(ip, (ipCount.get(ip) || 0) + 1);
+  sock.setTimeout(IDLE_TIMEOUT_MS, () => sock.destroy());          // dead / silent connections
+  const joinTimer = setTimeout(() => { if (!c.p) sock.destroy(); }, JOIN_TIMEOUT_MS); // never-joined connections
+  sock.on('data', d => {
+    c.buf = Buffer.concat([c.buf, d]);
+    try { parse(c); } catch (e) { console.error('bad client frame:', e.message); sock.destroy(); } // a bad packet must never crash the server
+  });
+  sock.on('close', () => {
+    clearTimeout(joinTimer); connCount--;
+    const n = (ipCount.get(ip) || 1) - 1; if (n > 0) ipCount.set(ip, n); else ipCount.delete(ip);
+    leave(c);
+  });
+  sock.on('error', () => { sock.destroy(); });
 });
 
-/* ---------- world (must match the boxes in Rumble_Arena.html) ---------- */
+/* ---------- world (must match the ARENAS boxes in index.html) ---------- */
 const toBox = ([x, z, w, h, d]) => [x - w / 2, 0, z - d / 2, x + w / 2, h, z + d / 2]; // [x0,y0,z0,x1,y1,z1]
 const ARENAS = [
   [[0, 0, 6, 5, 6], [-14, -10, 4, 2, 4], [14, -12, 4, 3, 4], [-16, 12, 6, 2, 3], [16, 14, 3, 2, 6], [0, -20, 10, 2, 2], [0, 20, 10, 2, 2], [-26, 0, 3, 4, 3], [26, 0, 3, 4, 3], [8, 8, 2, 1.2, 2], [-8, -8, 2, 1.2, 2], [-6, 14, 2, 1.5, 2], [7, -8, 2, 1.5, 2]],
@@ -165,7 +203,11 @@ function explosion(p, m) {
 }
 
 function onMsg(c, raw) {
+  const tm = Date.now();
+  if (tm - c.win > 1000) { c.win = tm; c.cnt = 0; }
+  if (++c.cnt > MAX_MSG_PER_SEC) { c.sock.destroy(); return; }       // flooding
   let m; try { m = JSON.parse(raw); } catch (e) { return; }
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return;       // JSON.parse('null') etc. used to crash the server
   if (m.t === 'join' && !c.p) {
     if (players.size >= MAXP) { frame(c.sock, 1, Buffer.from('{"t":"full"}')); c.sock.end(); return; }
     const map = Number.isInteger(m.map) && m.map >= 0 && m.map < ARENAS.length ? m.map : 0;
@@ -189,7 +231,7 @@ function onMsg(c, raw) {
     const requestedDash = !!m.d;
     if (requestedDash && !p.dash && t >= p.dashCd) { p.dashUntil = t + .22; p.dashCd = t + 2.2; }
     const dashActive = t < p.dashUntil;
-    const maxHorizontal = (dashActive ? 42 : 16) * dt + .35;
+    const maxHorizontal = (dashActive ? 60 : 32) * dt + .35; // above client caps: hop 19, x1.5 OVERDRIVE = 28.5, dash 36 x1.5 = 54
     const distance = Math.hypot(dx, dz);
     if (distance > maxHorizontal) { dx *= maxHorizontal / distance; dz *= maxHorizontal / distance; }
     const maxVertical = 10 * dt + .35;
@@ -213,4 +255,5 @@ setInterval(() => {
   all({ t: 'u', p: list });
 }, 50);
 
-server.listen(PORT, () => console.log('Rumble Arena PvP on http://localhost:' + PORT + '  (share http://<your-LAN-ip>:' + PORT + ' with friends)'));
+process.on('uncaughtException', e => console.error('uncaught:', e));
+server.listen(PORT, HOST, () => console.log('Rumble Arena PvP on http://' + (HOST === '0.0.0.0' ? 'localhost' : HOST) + ':' + PORT + (HOST === '0.0.0.0' ? '  (share http://<your-LAN-ip>:' + PORT + ' with friends)' : '')));

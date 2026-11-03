@@ -1,0 +1,15 @@
+{
+  "name": "rumble-arena",
+  "version": "1.0.0",
+  "description": "Fast arcade FPS in the browser: bot waves, a boss fight, and real-time PvP. Zero dependencies.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": ["fps", "three.js", "websocket", "multiplayer", "browser-game"],
+  "license": "MIT"
+}
