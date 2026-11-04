@@ -231,7 +231,7 @@ function onMsg(c, raw) {
     const requestedDash = !!m.d;
     if (requestedDash && !p.dash && t >= p.dashCd) { p.dashUntil = t + .22; p.dashCd = t + 2.2; }
     const dashActive = t < p.dashUntil;
-    const maxHorizontal = (dashActive ? 60 : 32) * dt + .35; // above client caps: hop 19, x1.5 OVERDRIVE = 28.5, dash 36 x1.5 = 54
+    const maxHorizontal = (dashActive ? 60 : 46) * dt + .35; // above client caps: hop 27, x1.5 OVERDRIVE = 40.5, dash 36 x1.5 = 54
     const distance = Math.hypot(dx, dz);
     if (distance > maxHorizontal) { dx *= maxHorizontal / distance; dz *= maxHorizontal / distance; }
     const maxVertical = 10 * dt + .35;
