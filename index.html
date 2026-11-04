@@ -234,7 +234,7 @@ const VM_CFG={
   1:{files:{shoot:'rifle_shooting.glb',reload:'rifle_reload.glb'},len:1.7,pos:[null,-.10,-.15],muz:[0,.88,-5.06],
      colors:{Cube:[0x3a3f46,.5,.42],Cube001:[0x7a8088,.6,.35],Cube002:[0x7e4120,.05,.7],Cube003:[0x2c3036,.45,.5],Cylinder:[0x15171a,.4,.5]}}
 };
-const VM={};
+const VM={};let VM_FINISH=null,VM_FINISH_FAILED=false,finishLookYaw=0,finishLookPitch=0;
 const muzLocal=new R.Vector3(0,0,-.68);
 function loadGLB(name,ok,fail,n=0){
   const urls=[name,'models/'+name];
@@ -267,6 +267,9 @@ function loadVM(idx){
   const done=()=>{if(--left===0)buildVM(idx,cfg,gl)};
   keys.forEach(k=>loadGLB(cfg.files[k],g=>{gl[k]=g;done()},done));
 }
+function startRifleFinish(){if(!waveFinish?.active)return;if(VM_FINISH_FAILED){finishWavePartDone('animation');return}if(!VM_FINISH)return;Object.keys(VM).forEach(k=>{VM[k].holder.visible=false;vmStop(VM[k])});boxGun.forEach(m=>m.visible=false);cam.updateMatrixWorld(true);gun.updateMatrixWorld(true);VM_FINISH.holder.position.copy(gun.getWorldPosition(new R.Vector3()));VM_FINISH.holder.quaternion.copy(gun.getWorldQuaternion(new R.Quaternion()));VM_FINISH.holder.visible=true;VM_FINISH.mixer.stopAllAction();VM_FINISH.action.reset().play();playWaveEnd();finishLookYaw=finishLookPitch=0}
+function buildRifleFinish(g){const cfg=VM_CFG[1],root=g.scene;root.updateMatrixWorld(true);const s=cfg.len/new R.Box3().setFromObject(root).getSize(new R.Vector3()).z;root.scale.setScalar(s);root.updateMatrixWorld(true);const c=new R.Box3().setFromObject(root).getCenter(new R.Vector3());root.position.set(cfg.pos[0]===null?0:cfg.pos[0]-c.x,cfg.pos[1]-c.y,cfg.pos[2]-c.z);root.updateMatrixWorld(true);root.traverse(o=>{if(!o.isMesh)return;o.frustumCulled=false;const k=cfg.colors[o.name.replace(/\./g,'')]||[0x3a3f47,.5,.5];o.material=new R.MeshStandardMaterial({color:k[0],metalness:k[1],roughness:k[2],side:R.DoubleSide})});const holder=new R.Group(),mixer=new R.AnimationMixer(root),clip=new R.AnimationClip('rifle_finish',-1,g.animations.flatMap(a=>a.tracks)),action=mixer.clipAction(clip);action.setLoop(R.LoopOnce);action.clampWhenFinished=true;holder.add(root);holder.visible=false;scene.add(holder);VM_FINISH={root,holder,mixer,action};mixer.addEventListener('finished',()=>finishWavePartDone('animation'));if(waveFinish?.active)startRifleFinish()}
+function loadRifleFinish(){if(!R.GLTFLoader){VM_FINISH_FAILED=true;return}loadGLB('rifle_finish.glb',buildRifleFinish,()=>{VM_FINISH_FAILED=true;finishWavePartDone('animation')})}
 function vmShoot(){const v=VM[cur];if(v&&v.shoot)v.shoot.reset().play()}
 function vmReload(){const v=VM[cur];if(v&&v.reload){v.shoot&&v.shoot.stop();v.reload.reset().play()}}
 function procReload(){return reloading&&!(VM[cur]&&VM[cur].reload)} // built-in dip/tilt only for guns without a reload clip
@@ -278,6 +281,7 @@ function applyGun(i){const q=W[i];gun.scale.set(q.sx,q.sx,q.sc);gm.color.setHex(
   if(vm)muzLocal.set(vm.muz.x/q.sx,vm.muz.y/q.sx,vm.muz.z/q.sc);else muzLocal.set(0,0,-.68);
   muz.position.copy(muzLocal);mlight.position.set(muzLocal.x,muzLocal.y,muzLocal.z-.12)}
 Object.keys(VM_CFG).forEach(loadVM);
+loadRifleFinish();
 let crossK=0;const rks=[],fx=[],TT={2:'DOUBLE KILL',3:'TRIPLE KILL',4:'QUADRA KILL',5:'PENTA KILL',6:'ACE',8:'UNSTOPPABLE',12:'GODLIKE'};
 const XH=['<circle cx="40" cy="40" r="9"/><circle cx="40" cy="40" r="1.5" fill="#fff"/>','<path d="M40 22v10M40 48v10M22 40h10M48 40h10"/><circle cx="40" cy="40" r="1.5" fill="#fff"/>','<circle cx="40" cy="40" r="26"/><path d="M40 12v6M40 62v6M12 40h6M62 40h6"/>','<path d="M40 24v7M40 49v7M24 40h7M49 40h7M30 30l4 4M50 30l-4 4M30 50l4-4M50 50l-4-4"/>','<path d="M4 40h28M48 40h28M40 4v28M40 48v28"/><circle cx="40" cy="40" r="1.5" fill="#fff"/><path d="M40 55v3M40 62v3M55 40h3M62 40h3"/>','<path d="M26 26h-6v6M54 26h6v6M26 54h-6v-6M54 54h6v-6M40 33v14M33 40h14"/>'];
 const XH_KEYS={0:'pistol',1:'rifle',3:'smg'},XH_DEFAULT={color:'#ffffff',opacity:100,outline:true,outlineWidth:2,dot:false,dotSize:2,inner:true,innerLength:8,innerGap:4,innerWidth:2,outer:false,outerLength:4,outerGap:10,outerWidth:2,dynamicMove:true,dynamicFire:true};
@@ -305,12 +309,13 @@ function banner(t,big){AnnouncementManager.announce(t,big)}
 const feedPool=Array.from({length:5},()=>{const d=document.createElement('div');d.className='kf-entry';d.innerHTML='<b class="kf-killer"></b><span class="kf-weapon"></span><span class="kf-head">HS</span><b class="kf-victim"></b>';d.hidden=true;return d});let feedCursor=0,feedSeq=0;
 function pushFeed(killer,w,hd,victim,kind){const k=$('kf'),d=feedPool[feedCursor++%feedPool.length],seq=++feedSeq;clearTimeout(d._hide);d.dataset.seq=seq;d.className='kf-entry'+(kind?' '+kind:'');d.querySelector('.kf-killer').textContent=killer;d.querySelector('.kf-weapon').textContent=w;d.querySelector('.kf-head').hidden=!hd;d.querySelector('.kf-victim').textContent=victim;d.hidden=false;k.prepend(d);d._hide=setTimeout(()=>{if(+d.dataset.seq===seq){d.classList.add('o');setTimeout(()=>{if(+d.dataset.seq===seq)d.hidden=true},220)}},3800)}
 function killFeed(n,hd,w){pushFeed('YOU',w,hd,n,'own')}
-function waveClear(){slow=.8;const fl=dmgTaken===0;if(fl){score+=300*wave;$('score').textContent=score}setTimeout(()=>banner(fl?'FLAWLESS +'+300*wave:'WAVE CLEAR',1),350);tone(200,1600,.5,.25,'sawtooth');{const p=new R.Vector3((Math.random()-.5)*50,0,(Math.random()-.5)*50);resolve(p,1.2);spawnOrb(p.x,p.z,Math.random()<.3)}hap([[0,200,1,1],[260,200,.7,.7]])}
+function waveClear(){if(waveFinish)return;slow=.8;const fl=dmgTaken===0;if(fl){score+=300*wave;$('score').textContent=score}setTimeout(()=>banner(fl?'FLAWLESS +'+300*wave:'WAVE CLEAR',1),350);const doFinish=wave>=16||(waveAllHeadshots&&waveHeadshots===waveSize)||waveGodlike;waveFinish={active:true};state='waveFinish';if(doFinish&&cur===1)startRifleFinish();else finishWavePartDone();{const p=new R.Vector3((Math.random()-.5)*50,0,(Math.random()-.5)*50);resolve(p,1.2);spawnOrb(p.x,p.z,Math.random()<.3)}hap([[0,200,1,1],[260,200,.7,.7]])}
+function finishWavePartDone(){if(!waveFinish?.active)return;waveFinish=null;if(VM_FINISH)VM_FINISH.holder.visible=false;applyGun(cur);state='play';spawnWave();tone(400,800,.3,.3,'triangle');rumble(120,.4,.4,2);syncGameMusic()}
 function award(b,hd,p0){
   bots.splice(bots.indexOf(b),1);{const kd=Math.max(1,Math.hypot(b.p.x-pos.x,b.p.z-pos.z)),kv=hd?9:5;dying.push({g:b.g,t:.7,vx:(b.p.x-pos.x)/kd*kv,vz:(b.p.z-pos.z)/kd*kv})}
   streak=now-lastK<3.2?streak+1:1;lastK=now;
   const pts=Math.round(p0*(od>0?2:1)*(1+b.ty*.5)*(1+Math.min(streak,10)*.1));score+=pts;$('score').textContent=score;
-  kills++;if(hd)heads++;bestStreak=Math.max(bestStreak,streak);if(Math.random()<.2)spawnOrb(b.p.x,b.p.z,Math.random()<.12);hp=Math.min(100,hp+8);dashCd=0;if(hd&&!W[cur].rocket&&ammo[cur]<W[cur].mag)ammo[cur]++;
+  kills++;if(hd){heads++;waveHeadshots++}else waveAllHeadshots=false;if(streak>=12)waveGodlike=true;bestStreak=Math.max(bestStreak,streak);if(Math.random()<.2)spawnOrb(b.p.x,b.p.z,Math.random()<.12);hp=Math.min(100,hp+8);dashCd=0;if(hd&&!W[cur].rocket&&ammo[cur]<W[cur].mag)ammo[cur]++;
   killFeed(['GRUNT','BRUTE','SNIPER','TANK','BOMBER','CHARGER'][b.ty]||'BOT',hd,W[cur].n);
   const cm=$('cmb');cm.textContent='+'+pts+(streak>1?'   x'+streak:'');cm.style.animation='none';void cm.offsetWidth;cm.style.animation='pop .3s ease-out';cm.style.opacity=1;clearTimeout(cmT);cmT=setTimeout(()=>cm.style.opacity=0,1000);
   burst(new R.Vector3(b.p.x,1.25,b.p.z),hd?0xffd23a:0x7df9ff,hd?22:12,hd?10:7);
@@ -338,7 +343,8 @@ const BM={};function bm(c){return BM[c]||(BM[c]=new R.MeshBasicMaterial({color:c
 function burst(p,col,n,sp){for(let i=0;i<n;i++){const m=new R.Mesh(pg,bm(col));m.position.copy(p);scene.add(m);parts.push({m,v:new R.Vector3((Math.random()-.5)*sp,Math.random()*sp*.8,(Math.random()-.5)*sp),t:.5+Math.random()*.4})}}
 const muz=new R.Mesh(new R.BoxGeometry(.12,.12,.08),new R.MeshBasicMaterial({color:0xffd34d}));muz.position.z=-.68;muz.visible=false;gun.add(muz);
 /* ---------- audio ---------- */
-let AC,master,nb,rifleShotBuffer=null,rifleReloadBuffer=null;
+let AC,master,nb,rifleShotBuffer=null,rifleReloadBuffer=null,bgMusicBuffer=null,overdriveMusicBuffer=null,waveEndBuffer=null,musicSource=null,musicMode=null,musicToken=0,overdriveMusicActive=false,waveEndMusicActive=false;
+let musicEnabled=(()=>{try{return localStorage.getItem('ra_music')!=='off'}catch(e){return true}})();
 function initAudio(){
   if(AC){AC.resume&&AC.resume();return}
   try{
@@ -348,10 +354,17 @@ function initAudio(){
     const n=AC.sampleRate;nb=AC.createBuffer(1,n,AC.sampleRate);const d=nb.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
     fetch('sfx/rifle/shooting.wav').then(r=>{if(!r.ok)throw Error('Rifle audio unavailable');return r.arrayBuffer()}).then(data=>AC.decodeAudioData(data)).then(buffer=>{rifleShotBuffer=buffer}).catch(()=>{});
     fetch('sfx/rifle/reloading.wav').then(r=>{if(!r.ok)throw Error('Rifle reload audio unavailable');return r.arrayBuffer()}).then(data=>AC.decodeAudioData(data)).then(buffer=>{rifleReloadBuffer=buffer}).catch(()=>{});
+    fetch('sfx/game/bg.wav').then(r=>{if(!r.ok)throw Error('Background music unavailable');return r.arrayBuffer()}).then(data=>AC.decodeAudioData(data)).then(buffer=>{bgMusicBuffer=buffer;syncGameMusic()}).catch(()=>{});
+    fetch('sfx/game/overdrive.wav').then(r=>{if(!r.ok)throw Error('Overdrive music unavailable');return r.arrayBuffer()}).then(data=>AC.decodeAudioData(data)).then(buffer=>{overdriveMusicBuffer=buffer;syncGameMusic()}).catch(()=>{});
+    fetch('sfx/game/wave-end.wav').then(r=>{if(!r.ok)throw Error('Wave-end audio unavailable');return r.arrayBuffer()}).then(data=>AC.decodeAudioData(data)).then(buffer=>{waveEndBuffer=buffer}).catch(()=>{});
   }catch(e){AC=null}
 }
 function playRifleShot(){if(!AC||!rifleShotBuffer)return;const s=AC.createBufferSource();s.buffer=rifleShotBuffer;s.connect(master);s.start()}
 function playRifleReload(){if(!AC||!rifleReloadBuffer)return;const s=AC.createBufferSource();s.buffer=rifleReloadBuffer;s.connect(master);s.start()}
+function playWaveEnd(){if(!AC||!waveEndBuffer||!musicEnabled||(state!=='play'&&state!=='waveFinish')||PVP||MODE!==0)return false;waveEndMusicActive=true;overdriveMusicActive=false;syncGameMusic();return true}
+function stopGameMusic(){musicToken++;if(musicSource){try{musicSource.stop()}catch(e){}musicSource=null}musicMode=null}
+function playGameMusic(mode){const buffer=mode==='overdrive'?overdriveMusicBuffer:mode==='waveEnd'?waveEndBuffer:bgMusicBuffer;if(!AC||!buffer)return;if(musicMode===mode&&musicSource)return;stopGameMusic();const token=musicToken,source=AC.createBufferSource();source.buffer=buffer;source.loop=mode==='background';source.connect(master);musicSource=source;musicMode=mode;if(mode==='overdrive'||mode==='waveEnd')source.onended=()=>{if(token===musicToken){musicSource=null;musicMode=null;if(mode==='overdrive')overdriveMusicActive=false;else waveEndMusicActive=false;syncGameMusic()}};source.start()}
+function syncGameMusic(){if(!musicEnabled||(state!=='play'&&state!=='waveFinish')||PVP||MODE!==0){stopGameMusic();return}playGameMusic(waveEndMusicActive?'waveEnd':overdriveMusicActive?'overdrive':'background')}
 function outN(pan){if(!pan||!AC.createStereoPanner)return master;const p=AC.createStereoPanner();p.pan.value=clamp(pan,-1,1);p.connect(master);return p}
 function noise(len,f0,f1,g,type,pan){
   if(!AC)return;const t=AC.currentTime,s=AC.createBufferSource();s.buffer=nb;
@@ -436,7 +449,7 @@ function reload(){
 // cap = air-strafe wish speed limit | acc = air accel (LOWER = speed builds more slowly per hop) | taper = how much gain fades as you near max (0 = none, 1 = stalls at max) | max = hop speed cap, x ov in OVERDRIVE (server allows 46)
 let hvx=0,hvz=0,hopN=0,bhSpd=0,jumpT=-99,landT=-99,bhLock=false;const BH={gacc:18,gfric:12,max:35,win:.10,buf:.12,ov:1.5,landBoost:.8,grav:26,jump:8.6}; // Speed builds in small, increasing steps on chained landings; air momentum stays fixed until the next landing.
 /* ---------- state ---------- */
-let state='menu',yaw=0,pitch=0,vy=0,onGround=true,hp=100,score=0,wave=0,waveT=0,waveSize=0,vig=0,hmT=0,hmKill=false,stepT=0,hbNext=0;
+let state='menu',yaw=0,pitch=0,vy=0,onGround=true,hp=100,score=0,wave=0,waveT=0,waveSize=0,vig=0,hmT=0,hmKill=false,stepT=0,hbNext=0,waveFinish=null,waveAllHeadshots=true,waveHeadshots=0,waveGodlike=false;
 const pos=new R.Vector3(0,0,30),bots=[],tracers=[],keys={},mouse={d:false},rc=new R.Raycaster();
 function tracer(a,b,col){
   const g=new R.BufferGeometry().setFromPoints([a,b]),l=new R.Line(g,new R.LineBasicMaterial({color:col,transparent:true}));
@@ -451,7 +464,7 @@ function blockTracer(a,b){
   scene.add(g);blocks.push({g,n,age:0});
 }
 function spawnWave(){
-  wave++;waveSize=3+wave;$('wave').textContent=wave;hp=Math.min(100,hp+30);dmgTaken=0;banner('WAVE '+wave,1);
+  wave++;waveSize=3+wave+Math.ceil(Math.max(0,wave-15)/2);waveAllHeadshots=true;waveHeadshots=0;waveGodlike=false;$('wave').textContent=wave;hp=Math.min(100,hp+30);dmgTaken=0;banner('WAVE '+wave,1);
   for(let i=0;i<waveSize;i++){
     const a=Math.random()*6.283,r=24+Math.random()*10,p=new R.Vector3(Math.cos(a)*r,0,Math.sin(a)*r);resolve(p,.6);
     const g=new R.Group(),m1=new R.MeshStandardMaterial({color:0xd9433a,roughness:.82}),m2=new R.MeshStandardMaterial({color:0xf5cba7,roughness:.9}),m3=new R.MeshStandardMaterial({color:0x202933,roughness:.72}),trim=new R.MeshStandardMaterial({color:0xd9a441,roughness:.5});
@@ -471,7 +484,7 @@ function spawnWave(){
 function reset(){
   buildArena(ARENA);
   bots.forEach(b=>scene.remove(b.g));bots.length=0;hp=100;score=0;wave=0;waveT=0;waveSize=0;dmgTaken=0;dashCd=0;dashT=0;slow=0;ads=0;vy=0;rks.forEach(r=>scene.remove(r.m));rks.length=0;$('kf').innerHTML='';orbs.forEach(o=>scene.remove(o.g));orbs.length=0;orbT=3;od=0;lvl=1;dispS=0;kills=heads=shots=hits=bestStreak=0;recoil=bloom=0;ammo=W.map(w=>w.mag);cur=0;applyGun(0);streak=0;
-  reloading=false;pos.set(0,0,30);yaw=0;pitch=0;vy=0;hvx=hvz=hopN=0;jumpT=landT=-99;bhLock=false;$('score').textContent=0;Dd=DF[DIF];BRN=BR[DIF];ORBK=MODE?[1.3,2,3,4][DIF]:1;clrBoss();try{localStorage.setItem('ra_mode',MODE);localStorage.setItem('ra_dif',DIF)}catch(e){}$('rtx').textContent='Wave';$('bb').style.display='none';MODE?startBoss():spawnWave();state='play';$('ov').style.display='none';
+  reloading=false;pos.set(0,0,30);yaw=0;pitch=0;vy=0;hvx=hvz=hopN=0;jumpT=landT=-99;bhLock=false;$('score').textContent=0;Dd=DF[DIF];BRN=BR[DIF];ORBK=MODE?[1.3,2,3,4][DIF]:1;clrBoss();try{localStorage.setItem('ra_mode',MODE);localStorage.setItem('ra_dif',DIF)}catch(e){}$('rtx').textContent='Wave';$('bb').style.display='none';MODE?startBoss():spawnWave();overdriveMusicActive=waveEndMusicActive=false;state='play';syncGameMusic();$('ov').style.display='none';
 }
 function die(w){
   state='dead';if(!w){rumble(500,1,1,5);tone(200,30,.8,.9,'sawtooth')}
@@ -587,6 +600,7 @@ const rows=[
  {t:()=>'Resume',a:()=>pause(false)},
  {t:()=>'Haptics intensity  '+S.hap+'%',adj:d=>{S.hap=clamp(S.hap+d*10,0,200)}},
  {t:()=>'Volume  '+S.vol+'%',adj:d=>{S.vol=clamp(S.vol+d*10,0,100);if(master)master.gain.value=S.vol/100*.6}},
+ {t:()=>'Music  '+(musicEnabled?'ON':'OFF'),adj:d=>{musicEnabled=!musicEnabled;try{localStorage.setItem('ra_music',musicEnabled?'on':'off')}catch(e){}syncGameMusic()}},
  {t:()=>'Look sensitivity  '+S.sens+'%',adj:d=>{S.sens=clamp(S.sens+d*10,30,200)}},{t:()=>'Field of view  '+S.fov,adj:d=>{S.fov=clamp(S.fov+d*4,60,110)}},{t:()=>'Screen shake  '+S.shake+'%',adj:d=>{S.shake=clamp(S.shake+d*20,0,200)}},
  {t:()=>'Reduce shake / flashes  '+(S.reduceFX?'ON':'OFF'),adj:d=>{S.reduceFX=!S.reduceFX;document.body.classList.toggle('reduce-effects',S.reduceFX)}},
  {t:()=>'Damage numbers  '+(S.damageNums?'ON':'OFF'),adj:d=>{S.damageNums=!S.damageNums}},
@@ -599,8 +613,8 @@ const rows=[
 ];
 function drawM(){$('rows').innerHTML=rows.map((r,i)=>'<div class="r'+(i===sel?' s':'')+'" data-i="'+i+'"><span>'+r.t()+'</span>'+(r.adj?'<span><b data-d="-1">-</b><b data-d="1">+</b></span>':'')+'</div>').join('')}
 function pause(on){
-  if(on&&state==='play'){mouse.d=false;mouse.r=false;for(const k in keys)keys[k]=false;HV.length=0;state='paused';pausedAt=performance.now();if(document.exitPointerLock)document.exitPointerLock();$('pm').style.display='flex';sel=0;drawM()}
-  else if(!on&&state==='paused'){state='play';$('pm').style.display='none';try{$('c').requestPointerLock()}catch(e){}}
+  if(on&&state==='play'){mouse.d=false;mouse.r=false;for(const k in keys)keys[k]=false;HV.length=0;state='paused';syncGameMusic();pausedAt=performance.now();if(document.exitPointerLock)document.exitPointerLock();$('pm').style.display='flex';sel=0;drawM()}
+  else if(!on&&state==='paused'){state='play';syncGameMusic();$('pm').style.display='none';try{$('c').requestPointerLock()}catch(e){}}
 }
 $('pm').onclick=e=>{const el=e.target.closest('[data-i]');if(!el)return;sel=+el.dataset.i;const r=rows[sel],d=e.target.dataset.d;mh(d?'adj':'sel');if(d&&r.adj)r.adj(+d);else if(r.a)r.a();drawM()};
 $('pm').onmouseover=e=>{const el=e.target.closest('[data-i]');if(el&&+el.dataset.i!==sel){sel=+el.dataset.i;mh('tick');drawM()}};
@@ -769,7 +783,7 @@ function spawnOrb(x,z,gold){
 }
 function pickOrb(o){
   const p=o.g.position.clone();burst(p,o.gold?0xffd23a:0x2dffb0,28,10);dashCd=0;
-  if(o.gold){od=8;banner('OVERDRIVE',1);flash('#ffd23a');tone(400,2400,.5,.3,'sawtooth');hap([[0,250,1,1],[300,200,.7,.9]]);dmgNum(p,'2× SCORE',true)}
+  if(o.gold){od=8;if(waveEndMusicActive)overdriveMusicActive=false;else overdriveMusicActive=true;syncGameMusic();banner('OVERDRIVE',1);flash('#ffd23a');tone(400,2400,.5,.3,'sawtooth');hap([[0,250,1,1],[300,200,.7,.9]]);dmgNum(p,'2× SCORE',true)}
   else{hp=Math.min(100,hp+30);flash('#2dffb0');tone(660,1320,.2,.25,'sine');tone(990,1980,.3,.2,'triangle',0,.08);hap([[0,90,.8,.4],[120,90,.5,.8]]);dmgNum(p,'+30 HP',false)}
 }
 function updOrbs(dt){
@@ -788,7 +802,7 @@ function drawRadar(){
 }
 $('wl').innerHTML='<span>1 PISTOL</span><span>2 '+W[primary].n+'</span>';
 function hud(dt){
-  const w=W[cur];$('am').style.color=ammo[cur]<=Math.ceil(w.mag*.25)&&od<=0?'#ff4655':'';
+  syncGameMusic();const w=W[cur];$('am').style.color=ammo[cur]<=Math.ceil(w.mag*.25)&&od<=0?'#ff4655':'';
   if(lastCur!==cur){lastCur=cur;[...$('wl').children].forEach((e,i)=>e.className=i===(cur===0?0:1)?'a':'')}
   $('rb').style.opacity=reloading?1:0;if(reloading)$('rbf').style.width=clamp(1-(reloadEnd-now)/w.rt,0,1)*100+'%';
   if(state==='play'&&!PVP){updOrbs(dt);if(od>0)od-=dt;if(MODE)while(score>=150*lvl*(lvl+1)){lvl++;levelUp()}}
@@ -908,7 +922,7 @@ function loop(tm){
     if(hp>0&&hp<35&&now>hbNext){hbNext=now+.95;tone(70,35,.14,.9);rumble(55,0,.9,2);setTimeout(()=>{tone(60,32,.12,.6);rumble(45,0,.6,2)},170)}
     if(!PVP&&!bots.length&&!MODE&&state==='play'){if(!waveT)waveT=now+.9;else if(now>waveT){waveT=0;spawnWave();tone(400,800,.3,.3,'triangle');rumble(120,.4,.4,2)}}
   }
-  const wq=W[cur];{const vm=VM[cur];if(vm)vm.mixer.update(dt)}ads+=((state==='play'&&(btn(6)||mouse.r))?1-ads:-ads)*Math.min(1,dt*16);
+  const wq=W[cur];{const vm=VM[cur];if(vm)vm.mixer.update(dt);if(VM_FINISH?.holder.visible)VM_FINISH.mixer.update(dt)}ads+=((state==='play'&&(btn(6)||mouse.r))?1-ads:-ads)*Math.min(1,dt*16);
   sprS+=(sprK-sprS)*Math.min(1,dt*8);fovK*=Math.max(0,1-dt*10);shk*=Math.max(0,1-dt*12);
   cam.fov=(S.fov+sprS*8+fovK)/(1+((wq.n==='SNIPER'?3.2:1.3)-1)*ads);cam.updateProjectionMatrix();crossK*=Math.max(0,1-dt*7);const moveCross=(mvK>.2?(sprK>.5?.18:.08):0)+(onGround?0:.18),xhProfile=customXH(cur)?XH_PROFILES[XH_KEYS[cur]]:null,xhScale=1+(xhProfile&&!xhProfile.dynamicFire?0:crossK)+(xhProfile&&!xhProfile.dynamicMove?0:moveCross);$('cross').style.transform='scale('+xhScale+')';$('cross').style.opacity=.9*(1-ads*(wq.n==='SNIPER'?0:.5));$('scope').style.opacity=wq.n==='SNIPER'?Math.max(0,ads*2-1):0;gun.visible=!(wq.n==='SNIPER'&&ads>.6);
   const dyw=(yaw-ly0)/Math.max(dt,.001),dpt=(pitch-lp0)/Math.max(dt,.001);ly0=yaw;lp0=pitch;
@@ -916,7 +930,7 @@ function loop(tm){
   const bm=Math.min(1,mvK)*(onGround?1:.2)*(1-ads*.8);bobT+=dt*(5+sprS*4)*Math.min(1,mvK);
   gun.position.x+=(.22*(1-ads)+gsx+Math.sin(bobT)*.012*wq.wt*bm-gun.position.x)*Math.min(1,dt*16);
   gun.position.y+=(-.2+ads*.06+gsy-Math.abs(Math.cos(bobT))*.014*wq.wt*bm-sprS*.06-(procReload()?.1:0)-gun.position.y)*Math.min(1,dt*(14/wq.wt));
-  const shakeAmp=S.shake/100*(S.reduceFX?.25:1);cam.position.set(pos.x+(Math.random()-.5)*shk*.04*shakeAmp,pos.y+1.7+(Math.random()-.5)*shk*.04*shakeAmp,pos.z);cam.rotation.set(pitch,yaw,(Math.random()-.5)*shk*.03*shakeAmp+(dashT>0?(dashV.sd||0)*-.09*Math.min(1,dashT/.2):0));
+  const shakeAmp=S.shake/100*(S.reduceFX?.25:1);cam.position.set(pos.x+(Math.random()-.5)*shk*.04*shakeAmp,pos.y+1.7+(Math.random()-.5)*shk*.04*shakeAmp,pos.z);const roll=(Math.random()-.5)*shk*.03*shakeAmp+(dashT>0?(dashV.sd||0)*-.09*Math.min(1,dashT/.2):0);cam.rotation.set(pitch,yaw,roll);let finishTarget=waveFinish?.active&&VM_FINISH?.holder.visible?VM_FINISH.root:null;if(finishTarget){scene.updateMatrixWorld(true);finishTarget.updateMatrixWorld(true);const d=new R.Box3().setFromObject(finishTarget).getCenter(new R.Vector3()).sub(cam.position),len=d.length()||1,ty=Math.atan2(-d.x,-d.z),tp=Math.asin(clamp(d.y/len,-1,1)),dy=Math.atan2(Math.sin(ty-yaw),Math.cos(ty-yaw));finishLookYaw+=(dy-finishLookYaw)*Math.min(1,dt*5);finishLookPitch+=(tp-pitch-finishLookPitch)*Math.min(1,dt*5)}else{finishLookYaw+=(0-finishLookYaw)*Math.min(1,dt*4);finishLookPitch+=(0-finishLookPitch)*Math.min(1,dt*4);if(Math.abs(finishLookYaw)<.0005&&Math.abs(finishLookPitch)<.0005)finishLookYaw=finishLookPitch=0}cam.rotation.set(pitch+finishLookPitch,yaw+finishLookYaw,roll);
   {const sk=380/wq.wt,sc2=1.3*Math.sqrt(sk),h=Math.min(dt,.033);gvz+=(-sk*gz-sc2*gvz)*h;gz+=gvz*h;gvrx+=(-sk*grx-sc2*gvrx)*h;grx+=gvrx*h;gvry+=(-sk*gry-sc2*gvry)*h;gry+=gvry*h;gvrz+=(-sk*grz-sc2*gvrz)*h;grz+=gvrz*h;gz=clamp(gz,-.1,.35);grx=clamp(grx,-.5,.7)}gun.position.z=-.5+gz;rl+=((procReload()?-.7:0)-rl)*Math.min(1,dt*11/wq.wt);gun.rotation.set(rl+grx,gry,grz);
   
   for(let i=blocks.length-1;i>=0;i--){const b=blocks[i];b.age+=dt;const head=Math.min(1,b.age/.05),tail=Math.max(0,(b.age-.05)/.07);
