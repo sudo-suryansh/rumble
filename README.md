@@ -18,6 +18,7 @@ Built with [Three.js](https://threejs.org/) and a tiny dependency-free Node.js s
 - **Pickups**: green orbs heal; gold orbs trigger **OVERDRIVE** (infinite ammo, faster fire, 2× score).
 - **Controller support** with directional rumble (hits from your left shake the left motor harder).
 - **Accessibility**: colorblind palette, reduced-motion support, adjustable camera shake, effects, volume and sensitivity.
+- **Developer tools (solo)**: ghost flight, frozen bots, hitboxes, invulnerability, infinite ammo, one-shot kills, no recoil and an FPS counter.
 
 ## 🚀 Quick start
 
@@ -50,6 +51,8 @@ Open **http://localhost:8000** and play.
 | Pause / settings | `Esc` | `Start` |
 
 Switch your pad to X-input mode, press any button on it, then hit Start.
+
+Open the pause menu for the tabbed **General**, **Controls**, **Crosshair**, **Developer**, **Video**, and **Audio** settings. Keyboard bindings save on this device, and **Reset all to default** restores the original keys. Video settings change the live render scale and shadow-map quality. In solo mode, enable **Developer mode**, then type `PANEL` to open the developer tools window.
 
 ## 🌐 Multiplayer
 
